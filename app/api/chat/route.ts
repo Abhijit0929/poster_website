@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
+import Groq from "groq-sdk";
 import { SYSTEM_PROMPT } from "../../../lib/knowledge-base";
+
+const groq = new Groq({
+  apiKey: process.env.GROQ_API_KEY,
+});
 
 export async function POST(req: NextRequest) {
   try {
@@ -12,51 +17,33 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const apiKey = process.env.GOOGLE_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json(
-        { error: "Server is missing GOOGLE_API_KEY. Set it in your Vercel project's environment variables." },
-        { status: 500 }
-      );
-    }
+    const chatCompletion = await groq.chat.completions.create({
+      model: "openai/gpt-oss-120b",
+      messages: [
+        {
+          role: "system",
+          content: SYSTEM_PROMPT,
+        },
+        ...messages,
+      ],
+      temperature: 0.7,
+      max_tokens: 1024,
+    });
 
-    const contents = messages.map((m: { role: string; content: string }) => ({
-      role: m.role === "assistant" ? "model" : "user",
-      parts: [{ text: m.content }],
-    }));
+    const content =
+      chatCompletion.choices[0]?.message?.content ||
+      "Sorry, I could not generate a response.";
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${apiKey}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-          contents,
-          generationConfig: { maxOutputTokens: 800 },
-        }),
-      }
-    );
+    return NextResponse.json({
+      message: content,
+    });
+  } catch (error) {
+    console.error("Groq API Error:", error);
 
-    if (!response.ok) {
-      const errText = await response.text();
-      return NextResponse.json(
-        { error: `Gemini API error: ${errText}` },
-        { status: response.status }
-      );
-    }
-
-    const data = await response.json();
-    const text = data.candidates?.[0]?.content?.parts
-      ?.map((p: { text?: string }) => p.text || "")
-      .join("")
-      .trim();
-
-    return NextResponse.json({ text: text || "No response generated." });
-  } catch (err) {
-    console.error("Chat API error:", err);
     return NextResponse.json(
-      { error: "Something went wrong processing your request." },
+      {
+        error: "Failed to generate response",
+      },
       { status: 500 }
     );
   }
